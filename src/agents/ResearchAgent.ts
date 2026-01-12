@@ -73,6 +73,7 @@ export class ResearchAgent extends BaseAgent {
             accepted: canAccept,
             priceInMNEE: ethers.formatEther(price),
             estimatedDuration: '5-10 minutes',
+            responderAddress: this.wallet.address,
             reason: canAccept ? undefined : 'Currently at capacity'
         };
 

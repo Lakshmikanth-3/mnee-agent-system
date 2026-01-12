@@ -6,6 +6,7 @@ import { BudgetAgent } from './agents/BudgetAgent';
 import { DashboardAgent } from './agents/DashboardAgent';
 import { AuditorAgent } from './agents/AuditorAgent';
 import { JudgeAgent } from './agents/JudgeAgent';
+import { AIAssistantAgent } from './agents/AIAssistantAgent';
 import { ethers } from 'ethers';
 
 // Load environment variables
@@ -71,6 +72,11 @@ async function main() {
 
     const judgeAgent = new JudgeAgent(
         process.env.JUDGE_AGENT_PRIVATE_KEY || '0xde9be85859411c49423129eac10405102a7445b026107f910d2d81dd938159ad',
+        RPC_URL
+    );
+
+    const aiAgent = new AIAssistantAgent(
+        process.env.AI_AGENT_PRIVATE_KEY || '0x689af8efa8c651a91ad287602527f3af2f956501a4235869dd8746a1545dd09d',
         RPC_URL
     );
 

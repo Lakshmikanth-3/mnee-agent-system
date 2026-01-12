@@ -41,6 +41,12 @@ export enum MessageType {
     STATUS_UPDATE = 'STATUS_UPDATE',
     REPUTATION_UPDATED = 'REPUTATION_UPDATED',
     USER_TASK_REQUEST = 'USER_TASK_REQUEST',
+
+    // Chat & AI Assistant messages
+    USER_CHAT_REQUEST = 'USER_CHAT_REQUEST',
+    CHAT_MESSAGE = 'CHAT_MESSAGE',
+    CHAT_RESPONSE = 'CHAT_RESPONSE',
+
     ERROR = 'ERROR'
 }
 
@@ -65,6 +71,7 @@ export interface TaskResponse {
     priceInMNEE: string;
     estimatedDuration?: string;
     reason?: string;
+    responderAddress?: string;
 }
 
 export interface EscrowCreateRequest {
@@ -150,4 +157,15 @@ export interface UserTaskRequest {
     taskDescription: string;
     requirements: string[];
     targetAgent?: string;
+}
+
+export interface ChatPayload {
+    text: string;
+    context?: any;
+}
+
+export interface ChatResponse {
+    text: string;
+    suggestedActions?: { label: string; action: string; payload: any }[];
+    isTaskTriggered?: boolean;
 }

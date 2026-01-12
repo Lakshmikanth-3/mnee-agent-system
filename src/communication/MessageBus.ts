@@ -55,7 +55,16 @@ export class MessageBus extends EventEmitter {
         // Also emit globally for monitoring
         this.emit('message', message);
 
-        console.log(`[MessageBus] Message sent: ${message.type} from ${message.from} to ${message.to}`);
+        // If an ERROR message is published, log full payload for easier debugging
+        if (message.type === MessageType.ERROR) {
+            try {
+                console.error(`[MessageBus] ERROR from ${message.from} to ${message.to}: ${JSON.stringify(message.payload)}`);
+            } catch (e) {
+                console.error(`[MessageBus] ERROR from ${message.from} to ${message.to}: (unserializable payload)`);
+            }
+        } else {
+            console.log(`[MessageBus] Message sent: ${message.type} from ${message.from} to ${message.to}`);
+        }
     }
 
     /**

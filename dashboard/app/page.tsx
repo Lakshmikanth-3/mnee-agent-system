@@ -86,6 +86,24 @@ export default function Dashboard() {
     ]);
     const [activityFeed, setActivityFeed] = useState<{ msg: string, type: string, time: number }[]>([]);
 
+    // Chatbot State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatInput, setChatInput] = useState('');
+    const [chatHistory, setChatHistory] = useState<{ sender: 'user' | 'bot', text: string, suggestedActions?: any[] }[]>([
+        { sender: 'bot', text: 'Hello! I am the AgentPay AI Assistant. I can explain the project or help you hire agents. How can I help?' }
+    ]);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+
+    const [toasts, setToasts] = useState<{ id: string, message: string, type: 'info' | 'success' | 'warning' | 'error' }[]>([]);
+
+    const showToast = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+        const id = Math.random().toString(36).substring(7);
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+        }, 3000);
+    };
+
     useEffect(() => {
         const websocket = new WebSocket('ws://localhost:8080');
         wsRef.current = websocket;
@@ -93,10 +111,34 @@ export default function Dashboard() {
         websocket.onopen = () => {
             console.log('Connected to agent system');
             setConnected(true);
+            showToast('System Connected: Agent Bus Live', 'success');
         };
 
         websocket.onmessage = (event) => {
             const dashboardData = JSON.parse(event.data);
+
+            // Handle AI Chat responses
+            if (dashboardData.type === 'CHAT_RESPONSE') {
+                const response = dashboardData.payload;
+                setChatHistory(prev => [...prev, {
+                    sender: 'bot',
+                    text: response.text,
+                    suggestedActions: response.suggestedActions
+                }]);
+                return;
+            }
+
+            // Handle Critical System Events for Toasts
+            if (dashboardData.type === 'ERROR') {
+                showToast(`System Error: ${dashboardData.payload?.error || 'Unknown issue'}`, 'error');
+            } else if (dashboardData.type === 'ESCROW_CREATED') {
+                showToast(`Escrow Locked: ${dashboardData.payload?.amount} MNEE`, 'success');
+            } else if (dashboardData.type === 'MILESTONE_RELEASED') {
+                showToast('Payment Released Successfully', 'success');
+            } else if (dashboardData.type === 'DISPUTE_RAISED') {
+                showToast('Dispute Raised: Mediator Summoned', 'warning');
+            }
+
             setData(dashboardData);
 
             // Update workflow visualization based on latest transactions
@@ -109,6 +151,7 @@ export default function Dashboard() {
                 if (latest.type.includes('REQUEST')) addLog(`[${latest.from}] -> [${latest.to}]: ${latest.type}`, 'request');
                 else if (latest.type.includes('COMPLETED')) addLog(`[${latest.from}]: Work finished and proof submitted.`, 'success');
                 else if (latest.type.includes('DISPUTE')) addLog(`[${latest.from}]: DISPUTE RAISED! Mediator engaged.`, 'error');
+                else if (latest.type === 'ERROR') addLog(`[${latest.from}]: ERROR - ${latest.payload?.error || 'Unknown issue'}`, 'error');
                 else addLog(`[${latest.from}] performed ${latest.type}`, 'info');
             }
 
@@ -131,6 +174,7 @@ export default function Dashboard() {
         websocket.onerror = (error) => {
             console.error('WebSocket error:', error);
             setConnected(false);
+            showToast('Connection Lost: Retrying...', 'error');
         };
 
         websocket.onclose = () => {
@@ -141,6 +185,34 @@ export default function Dashboard() {
         return () => {
             websocket.close();
         };
+    }, []);
+
+    // Wallet Event Listeners
+    useEffect(() => {
+        if (typeof window !== 'undefined' && (window as any).ethereum) {
+            const ethereum = (window as any).ethereum;
+
+            const handleChainChanged = (chainId: string) => {
+                showToast(`Ethereum chain ID changed to ${chainId}`, 'warning');
+                addLog(`Network changed to Chain ID: ${chainId}`, 'info');
+            };
+
+            const handleAccountsChanged = (accounts: string[]) => {
+                if (accounts.length > 0) {
+                    showToast(`Wallet Connected: ${accounts[0].substring(0, 6)}...`, 'success');
+                } else {
+                    showToast('Wallet Disconnected', 'warning');
+                }
+            };
+
+            ethereum.on('chainChanged', handleChainChanged);
+            ethereum.on('accountsChanged', handleAccountsChanged);
+
+            return () => {
+                ethereum.removeListener('chainChanged', handleChainChanged);
+                ethereum.removeListener('accountsChanged', handleAccountsChanged);
+            };
+        }
     }, []);
 
     const addLog = (msg: string, type: string) => {
@@ -208,10 +280,119 @@ export default function Dashboard() {
         return 'tx-task';
     };
 
+    const handleSendChat = (message: string) => {
+        if (!message.trim()) return;
+
+        // Add user message immediately
+        setChatHistory(prev => [...prev, { sender: 'user', text: message }]);
+        setChatInput('');
+
+        // Send to backend
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: 'CHAT_MESSAGE',
+                text: message
+            }));
+        } else {
+            // Fallback if not connected
+            setTimeout(() => {
+                setChatHistory(prev => [...prev, {
+                    sender: 'bot',
+                    text: 'System offline. Please check connection.',
+                }]);
+            }, 500);
+        }
+    };
+
+    const handleSuggestedAction = (action: any) => {
+        if (action.action === 'CHAT') {
+            handleSendChat(action.payload.text);
+        }
+    };
+
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chatHistory, isChatOpen]);
+
     const filteredTransactions = data?.transactions.filter(tx => {
         if (filter === 'all') return true;
         return tx.type.includes(filter.toUpperCase());
     }) || [];
+
+    const ChatWindow = () => (
+        <div className={`chat-window ${isChatOpen ? 'open' : ''}`} style={{
+            position: 'fixed', bottom: '2rem', right: '2rem', width: '350px',
+            height: isChatOpen ? '500px' : '0',
+            background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+            borderRadius: '1rem', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)', transition: 'all 0.3s ease', zIndex: 1000,
+            opacity: isChatOpen ? 1 : 0, pointerEvents: isChatOpen ? 'all' : 'none'
+        }}>
+            <div style={{ padding: '1rem', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="status-dot status-active"></div>
+                    <span style={{ fontWeight: 600 }}>AI Assistant</span>
+                </div>
+                <button onClick={() => setIsChatOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ flex: 1, padding: '1rem', overflowY: 'auto' }}>
+                {chatHistory.map((msg, idx) => (
+                    <div key={idx} style={{
+                        marginBottom: '1rem',
+                        textAlign: msg.sender === 'user' ? 'right' : 'left'
+                    }}>
+                        <div style={{
+                            display: 'inline-block',
+                            padding: '0.75rem 1rem',
+                            borderRadius: '1rem',
+                            borderTopRightRadius: msg.sender === 'user' ? '0.25rem' : '1rem',
+                            borderTopLeftRadius: msg.sender === 'bot' ? '0.25rem' : '1rem',
+                            background: msg.sender === 'user' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                            color: msg.sender === 'user' ? 'black' : 'var(--text-primary)',
+                            maxWidth: '85%',
+                            fontSize: '0.9rem'
+                        }}>
+                            {msg.text}
+                        </div>
+                        {msg.suggestedActions && (
+                            <div style={{ marginTop: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                {msg.suggestedActions.map((action, i) => (
+                                    <button key={i} onClick={() => handleSuggestedAction(action)} style={{
+                                        fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '1rem',
+                                        background: 'transparent', border: '1px solid var(--accent-primary)',
+                                        color: 'var(--accent-primary)', cursor: 'pointer'
+                                    }}>
+                                        {action.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ))}
+                <div ref={chatEndRef} />
+            </div>
+
+            <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleSendChat(chatInput)}
+                        placeholder="Ask anything..."
+                        style={{
+                            flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                            borderRadius: '0.5rem', padding: '0.5rem', color: 'var(--text-primary)'
+                        }}
+                    />
+                    <button onClick={() => handleSendChat(chatInput)} style={{
+                        background: 'var(--accent-primary)', border: 'none', borderRadius: '0.5rem',
+                        width: '40px', cursor: 'pointer', color: 'black'
+                    }}>→</button>
+                </div>
+            </div>
+        </div>
+    );
 
     const WorkflowVisualizer = () => (
         <div className="card" style={{ marginBottom: '2rem', background: 'rgba(0,0,0,0.4)', borderColor: 'var(--accent-primary)', borderWidth: '1px' }}>
@@ -239,21 +420,21 @@ export default function Dashboard() {
     );
 
     const ActivityLog = () => (
-        <div className="card terminal-card">
-            <div className="terminal-header">
-                <span>System Message Bus History</span>
+        <div className="card terminal-card" style={{ padding: '0.5rem', maxWidth: '100%' }}>
+            <div className="terminal-header" style={{ padding: '0.5rem 0.75rem' }}>
+                <span style={{ fontSize: '0.95rem', fontWeight: 600 }}>System Message Bus</span>
                 <div className="terminal-controls">
                     <span></span><span></span><span></span>
                 </div>
             </div>
-            <div className="terminal-body">
+            <div className="terminal-body" style={{ maxHeight: '150px', overflowY: 'auto', fontSize: '0.85rem', padding: '0.5rem' }}>
                 {activityFeed.length === 0 ? (
-                    <div className="terminal-line muted">Awaiting system activity...</div>
+                    <div className="terminal-line muted" style={{ padding: '0.25rem 0' }}>Awaiting system activity...</div>
                 ) : (
-                    activityFeed.map((log, i) => (
-                        <div key={i} className={`terminal-line ${log.type}`}>
-                            <span className="time">[{formatTime(log.time)}]</span>
-                            <span className="msg">{log.msg}</span>
+                    activityFeed.slice(0, 30).map((log, i) => (
+                        <div key={i} className={`terminal-line ${log.type}`} style={{ padding: '0.25rem 0' }}>
+                            <span className="time" style={{ fontSize: '0.8rem' }}>[{formatTime(log.time)}]</span>
+                            <span className="msg" style={{ marginLeft: '0.5rem', fontSize: '0.9rem' }}>{log.msg}</span>
                         </div>
                     ))
                 )}
@@ -621,6 +802,59 @@ export default function Dashboard() {
                     )}
                 </header>
                 {renderContent()}
+
+                {/* Floating Chat Button */}
+                <button
+                    onClick={() => setIsChatOpen(!isChatOpen)}
+                    style={{
+                        position: 'fixed', bottom: '2rem', right: '2rem', width: '60px', height: '60px',
+                        borderRadius: '50%', background: 'var(--accent-primary)', border: 'none',
+                        boxShadow: '0 4px 14px rgba(0,0,0,0.25)', cursor: 'pointer', zIndex: 900,
+                        display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: '1.5rem',
+                        transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                    }}
+                    className="floating-chat-btn"
+                >
+                    💬
+                </button>
+
+                <ChatWindow />
+
+                {/* Toast Notification Container (compact, top-right) */}
+                <div style={{
+                    position: 'fixed',
+                    top: '20px',
+                    right: '20px',
+                    left: 'auto',
+                    zIndex: 2000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    alignItems: 'flex-end'
+                }}>
+                    {toasts.map(toast => (
+                        <div key={toast.id} style={{
+                            padding: '6px 10px',
+                            background: toast.type === 'error' ? '#EF4444' :
+                                toast.type === 'success' ? '#10B981' :
+                                    toast.type === 'warning' ? '#F59E0B' : '#3B82F6',
+                            color: 'white',
+                            borderRadius: '6px',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '0.85rem',
+                            animation: 'slideDown 0.25s ease-out',
+                            maxWidth: '320px'
+                        }}>
+                            <span style={{ fontSize: '0.9rem' }}>{toast.type === 'success' ? '✅' :
+                                toast.type === 'error' ? '❌' :
+                                    toast.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                            <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{toast.message}</span>
+                        </div>
+                    ))}
+                </div>
             </main>
         </div>
     );

@@ -141,7 +141,7 @@ export class StartupAgent extends BaseAgent {
         // Store hired agent info
         this.hiredAgents.set(response.taskId, {
             name: message.from,
-            address: '', // Will be filled later if needed
+            address: response.responderAddress || '',
             taskId: response.taskId,
             price: response.priceInMNEE,
             status: 'negotiating'
@@ -171,11 +171,11 @@ export class StartupAgent extends BaseAgent {
         // Step 3: Create escrow
         hiredAgent.status = 'escrow_pending';
 
-        // Get provider address (in real scenario, would query from agent registry)
-        // For now, we'll use a placeholder and let EscrowAgent handle it
+        // Create escrow
+        // Use the actual address of the hired agent (ResearchAgent)
         const escrowRequest: EscrowCreateRequest = {
             taskId: hiredAgent.taskId,
-            provider: this.wallet.address, // In demo, Startup acts as payer wallet
+            provider: hiredAgent.address || this.wallet.address, // Fallback to self if missing (should not happen)
             amount: hiredAgent.price,
             milestones: 2 // Default 2 milestones
         };

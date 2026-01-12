@@ -9,13 +9,22 @@ async function main() {
 
     // Deploy or use existing MNEE token
     let mneeAddress = process.env.MNEE_TOKEN_ADDRESS;
-    let mnee;
+    let mnee: any;
 
+    let needsDeployment = true;
     if (mneeAddress && mneeAddress.startsWith('0x') && mneeAddress.length === 42) {
-        console.log("Using existing MNEE token at:", mneeAddress);
-        mnee = await ethers.getContractAt("MNEE", mneeAddress);
-    } else {
-        console.log("No valid MNEE address found, deploying new MNEE token...");
+        const code = await ethers.provider.getCode(mneeAddress);
+        if (code !== '0x') {
+            console.log("Using existing MNEE token at:", mneeAddress);
+            mnee = await ethers.getContractAt("MNEE", mneeAddress);
+            needsDeployment = false;
+        } else {
+            console.log(`No code found at ${mneeAddress}. A new token must be deployed for local network.`);
+        }
+    }
+
+    if (needsDeployment) {
+        console.log("Deploying new MNEE token...");
         const MNEE = await ethers.getContractFactory("MNEE");
         mnee = await MNEE.deploy();
         await mnee.waitForDeployment();
@@ -25,7 +34,7 @@ async function main() {
 
     // Deploy Escrow contract
     const MNEEEscrow = await ethers.getContractFactory("MNEEEscrow");
-    const escrow = await MNEEEscrow.deploy(mneeAddress);
+    const escrow = await MNEEEscrow.deploy(mneeAddress as string);
     await escrow.waitForDeployment();
     const escrowAddress = await escrow.getAddress();
     console.log("MNEEEscrow contract deployed to:", escrowAddress);
